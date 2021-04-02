@@ -15,6 +15,7 @@ from urllib.parse import unquote_plus as urldecode
 
 MiguHeaders = {'origin': 'http://music.migu.cn/', 'referer': 'http://m.music.migu.cn/v3/',
 	'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:77.0) Gecko/20190101 Firefox/77.0'}
+MiguCookies = { 'migu_music_sid': '' }
 
 def search(keyword):
 	search_info = requests.get('http://m.music.migu.cn/migu/remoting/scr_search_tag?keyword=%s&&type=2&rows=1&pgc=1' \
@@ -46,7 +47,7 @@ def initial(musicId, quality):
 	encrypted_data = urlencode(encrypted_request_data[0])
 	encrypted_secKey = urlencode(encrypted_request_data[1])
 	music_source = requests.get('https://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo?dataType=2&data=%s&secKey=%s' \
-		% (encrypted_data, encrypted_secKey), headers = MiguHeaders)
+		% (encrypted_data, encrypted_secKey), headers = MiguHeaders, cookies=MiguCookies)
 	if (music_source.status_code != 200) or (not music_source.text):
 		return False
 	else:
