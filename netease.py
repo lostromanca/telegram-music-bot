@@ -10,6 +10,7 @@ import json
 import pyncm
 import requests
 
+from pyncm.apis import cloudsearch as ncmsearch
 from pyncm.apis import track as ncmtrack
 from urllib.parse import quote as urlencode
 from urllib.parse import unquote as urldecode
@@ -19,7 +20,7 @@ from urllib.parse import unquote as urldecode
 pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open("ncm.session", "r", encoding="utf-8").read()))
 
 def search(keyword):
-	# search_info = ncmtrack.cloudsearch.GetSearchResult(keyword=urlencode(keyword), type=1, limit=1, offset=0)
+	# search_info = ncmsearch.GetSearchResult(keyword=urlencode(keyword), type=1, limit=1, offset=0)
 	search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1&limit=1&offset=0' % urlencode(keyword))
 	if (search_info.ok and search_info.text):
 		search_info.encoding = 'utf-8'
