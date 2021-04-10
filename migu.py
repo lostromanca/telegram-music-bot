@@ -12,8 +12,8 @@ import re
 import requests
 import string
 
-from urllib.parse import quote_plus as urlencode
-from urllib.parse import unquote_plus as urldecode
+from urllib.parse import quote as urlencode
+from urllib.parse import unquote as urldecode
 
 MiguHeaders = {'origin': 'http://music.migu.cn/', 'referer': 'http://m.music.migu.cn/v3/',
 	'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:77.0) Gecko/20190101 Firefox/77.0', 'channel': '0',
@@ -102,7 +102,7 @@ def get_song_type():
 
 def get_song_link():
 	try:
-		# return 'http:%s' % music_source['data']['playUrl']
+		# return 'http:%s' % urlencode(music_source['data']['playUrl'])
 		return music_source['data']['url']
 	except KeyError:
 		return False
