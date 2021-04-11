@@ -50,7 +50,7 @@ def initial(musicId, quality):
 		except:
 			return False
 	''' Deprecated, as it requires login, and the cookie expires quickly.
-	# Acceptable quality: 3=SQ, 2=HQ, 1=PQ
+	# Acceptable quality: 1=PQ, 2=HQ, 3=SQ
 	request_data = { 'copyrightId': music_id, 'type': int(quality) }
 	encrypted_request_data = mgAES.encrypt(json.dumps(request_data))
 	encrypted_data = urlencode(encrypted_request_data[0])
@@ -73,6 +73,7 @@ def initial(musicId, quality):
 			return True
 
 def get_album_link(type):
+	# Acceptable type: picS, picM, picL
 	try:
 		return music_info['data'][type]
 	except KeyError:
