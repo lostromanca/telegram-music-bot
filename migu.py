@@ -19,6 +19,8 @@ MiguHeaders = {'origin': 'http://music.migu.cn/', 'referer': 'http://m.music.mig
 	'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:77.0) Gecko/20190101 Firefox/77.0', 'channel': '0',
 	'aversionid': ''}
 # MiguCookies = { 'migu_music_sid': '' }
+MiguProxies = {'http': '',
+	'https': ''}
 
 def search(keyword):
 	search_info = requests.get('http://m.music.migu.cn/migu/remoting/scr_search_tag?keyword=%s&&type=2&rows=1&pgc=1' \
@@ -61,7 +63,8 @@ def initial(musicId, quality):
 	random_str = ''.join(random.sample(string.digits + string.digits, 18))
 	# Acceptable quality: PQ, HQ, SQ, ZQ | unimplemented: LQ, Z3D, ZQ24, ZQ32
 	music_source = requests.get('https://app.c.nf.migu.cn/MIGUM2.0/strategy/listen-url/v2.2?lowerQualityContentId=%s' \
-		% random_str + '&netType=01&resourceType=E&songId=%s&toneFlag=%s' % (song_id, quality), headers=MiguHeaders)
+		% random_str + '&netType=01&resourceType=E&songId=%s&toneFlag=%s' % (song_id, quality), headers=MiguHeaders,
+		proxies=MiguProxies)
 	if (music_source.status_code != 200) or (not music_source.text):
 		return False
 	else:
