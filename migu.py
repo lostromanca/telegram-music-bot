@@ -70,7 +70,7 @@ def initial(musicId, quality):
 	else:
 		music_source = json.loads(json.loads(json.dumps(music_source.text)))
 		# if music_source['returnCode'] != '000000':
-		if music_source['code'] != '000000':
+		if (music_source['code'] != '000000') or (music_source['formatType'] != quality):
 			return False
 		else:
 			return True
