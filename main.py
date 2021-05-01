@@ -171,7 +171,7 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 		]
 	)
 	try:
-		app.edit_message_text(chat_id, msg_id, 'Uploading music...\n\nSong size: %sB' % format_size(song_size))
+		app.edit_message_text(chat_id, msg_id, 'Uploading music...\n\nSong size: %s' % format_size(song_size))
 		app.send_audio(chat_id, audio=song_file, reply_to_message_id=orig_msg_id, caption=song_caption, duration=song_duration,
 			performer=song_singers, title=song_name, thumb=album_file, file_name='%s - %s.%s' % (song_singers, song_name, song_type),
 				reply_markup=song_reply_markup)
@@ -210,7 +210,6 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 		return False
 
 	music_default_img = 'https://h5static.kuwo.cn/upload/image/4f768883f75b17a426c95b93692d98bec7d3ee9240f77f5ea68fc63870fdb050.png'
-	music_singers = str()
 	music_pack_info = [ ]
 	music_pack_info.append('kuwo')
 	music_pack_info.append(str(musicId))
@@ -288,14 +287,13 @@ def get_migu_music(musicId, msg_id, chat_id):
 			else:
 				break
 
-	music_singers = str()
 	music_pack_info = [ ]
 	music_pack_info.append('migu')
 	music_pack_info.append(str(musicId))
 	music_pack_info.append(music_info.get('data').get('songName'))
 	music_pack_info.append(None)
 	music_pack_info.append(' / '.join(music_info.get('data').get('singerName')))
-	music_pack_info.append(music_details.xpath('//div[@class="songInfo"]/input[@id="albumid"]/@value')[0])
+	music_pack_info.append(music_details.xpath('//div[@class="songInfo"]/input[@id="albumid"]/@value')[0] or 0)
 	music_pack_info.append(music_details.xpath('//div[@class="info_about"]/p')[3].xpath('//span/a/text()')[0])
 	music_pack_info.append(music_info.get('data').get('picS'))
 	music_pack_info.append(re.findall('flac|mp3', music_source.get('data').get('url'))[0])
@@ -455,7 +453,7 @@ def netease_command(client, message):
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
 				netease_musicid = search_info.get('result').get('songs')[0].get('id')
-				netease_info = get_kuwo_music(netease_musicid, update_message_id, message.chat.id)
+				netease_info = get_netease_music(netease_musicid, update_message_id, message.chat.id)
 				if netease_info: upload_music(netease_info, update_message_id, original_message_id, message.chat.id)
 		else:
 			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
