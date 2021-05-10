@@ -37,7 +37,7 @@ from urllib.parse import unquote as urldecode
 
 # pyncm.login.LoginViaCellphone(input('Phone number: '), getpass.getpass('Password: '))
 open('ncm.session', 'w+').write(pyncm.DumpSessionAsString(pyncm.GetCurrentSession()))
-# pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open("ncm.session", "r", encoding="utf-8").read()))
+# pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open('ncm.session', 'r', encoding='utf-8').read()))
 
 app = Client('musicbot', bot_token='',
 	api_id='', api_hash='')
@@ -61,11 +61,11 @@ def format_size(B):
 		MiB = KiB / 1024
 		if MiB >= 1024:
 			GiB = MiB / 1024
-			return "%.3f GiB" % GiB
+			return '%.3f GiB' % GiB
 		else:
-			return "%.3f MiB" % MiB
+			return '%.3f MiB' % MiB
 	else:
-		return "%.3f KiB" % KiB
+		return '%.3f KiB' % KiB
 
 def GetMiddleStr(content, startStr, endStr):
 	startIndex = content.index(startStr)
@@ -92,7 +92,7 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 	'''
 	Info:
 	0. Platform
-	1. Music ID
+	1. Song ID
 	2. Song name
 	3. Song alias name
 	4. Singer(s)
@@ -146,7 +146,7 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 	song_info = tinytag.get(song_file)
 	song_bitrate = song_info.bitrate
 	song_duration = int(song_info.duration)
-	song_size = str(song_info.filesize)
+	song_size = song_info.filesize
 	song_caption = 'Platform: %s\n' % platform
 	song_caption += 'Song ID: %s\n' % song_id
 	song_caption += 'Song name: %s\n' % song_name
@@ -223,7 +223,7 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 	'''
 	music_album_url = requests.get('http://artistpicserver.kuwo.cn/pic.web?corp=kuwo&type=rid_pic&pictype=url&' +
 		'content=list&size=320x320&rid=%s' % musicId).text
-	if (not music_album_url) or (music_album_url == "NO_PIC"):
+	if (not music_album_url) or (music_album_url == 'NO_PIC'):
 		music_pack_info.append(music_default_img)
 	else:
 		music_pack_info.append(music_album_url)
@@ -293,8 +293,8 @@ def get_migu_music(musicId, msg_id, chat_id):
 	music_pack_info.append(music_info.get('data').get('songName'))
 	music_pack_info.append(None)
 	music_pack_info.append(' / '.join(music_info.get('data').get('singerName')))
-	music_pack_info.append(music_details.xpath('//div[@class="songInfo"]/input[@id="albumid"]/@value')[0] or 0)
-	music_pack_info.append(music_details.xpath('//div[@class="info_about"]/p')[3].xpath('//span/a/text()')[0])
+	music_pack_info.append(music_details.xpath('//div[@class="songInfo"]/input[@id="albumid"]/@value')[0] or '0')
+	music_pack_info.append(music_details.xpath('//div[@class="info_about"]/p')[3].xpath('//span/a/text()')[0] or 'None')
 	music_pack_info.append(music_info.get('data').get('picS'))
 	music_pack_info.append(re.findall('flac|mp3', music_source.get('data').get('url'))[0])
 	music_pack_info.append(music_source.get('data').get('url'))
@@ -351,9 +351,9 @@ def get_netease_music(musicId, msg_id, chat_id):
 	music_pack_info.append('https://music.163.com/#/album?id=' + str(music_pack_info[5]))
 	return music_pack_info
 
-@app.on_message(filters.command("kuwo", case_sensitive=True))
+@app.on_message(filters.command('kuwo', case_sensitive=True))
 def kuwo_command(client, message):
-	kuwo_musicinfo = ' '.join(message.text.split(" ")[1:])
+	kuwo_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not kuwo_musicinfo:
 		message.reply_text('Usage: /kuwo musicrId|keyword', quote=True)
 		return
@@ -395,9 +395,9 @@ def kuwo_command(client, message):
 		kuwo_info = get_kuwo_music(kuwo_musicinfo, update_message_id, message.chat.id)
 		if kuwo_info: upload_music(kuwo_info, update_message_id, original_message_id, message.chat.id)
 
-@app.on_message(filters.command("migu", case_sensitive=True))
+@app.on_message(filters.command('migu', case_sensitive=True))
 def migu_command(client, message):
-	migu_musicinfo = ' '.join(message.text.split(" ")[1:])
+	migu_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not migu_musicinfo:
 		message.reply_text('Usage: /migu copyrightId|keyword', quote=True)
 		return
@@ -430,9 +430,9 @@ def migu_command(client, message):
 		migu_info = get_migu_music(migu_musicinfo, update_message_id, message.chat.id)
 		if migu_info: upload_music(migu_info, update_message_id, original_message_id, message.chat.id)
 
-@app.on_message(filters.command("netease", case_sensitive=True))
+@app.on_message(filters.command('netease', case_sensitive=True))
 def netease_command(client, message):
-	netease_musicinfo = ' '.join(message.text.split(" ")[1:])
+	netease_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not netease_musicinfo:
 		message.reply_text('Usage: /netease songId|keyword', quote=True)
 		return
