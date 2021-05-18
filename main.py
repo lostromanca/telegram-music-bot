@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 #-*-coding:utf-8-*-
-#
 # SPDX-License-Identifier: AGPL-3.0-only
 #
 # Copyright (C) 2021 Shell-Script
 # (https://ctcgfw.eu.org)
 
 import base64
+import cv2
+import fcntl
 # import getpass
 import logging
 import json
 import kwDES
 # import mgAES
 import os
-# import pickledb
+import pickledb
 import pyncm
-import random
-import re
-import requests
+import random, re, requests
 # import socket
 import string
 # import subprocess
@@ -27,21 +26,27 @@ import wget
 from lxml import etree
 from pyncm.apis import cloudsearch as ncmsearch
 from pyncm.apis import track as ncmtrack
-from pyrogram import Client
-from pyrogram import filters
-from pyrogram.types import InlineKeyboardButton
-from pyrogram.types import InlineKeyboardMarkup
+from pyncm.apis import video as ncmmvtrack
+from pyrogram import filters, Client
+from pyrogram.errors.exceptions.bad_request_400 import MessageIdInvalid
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from tinytag import TinyTag as tinytag
 from urllib.parse import quote as urlencode
 from urllib.parse import unquote as urldecode
 
 # pyncm.login.LoginViaCellphone(input('Phone number: '), getpass.getpass('Password: '))
-open('ncm.session', 'w+').write(pyncm.DumpSessionAsString(pyncm.GetCurrentSession()))
-# pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open('ncm.session', 'r', encoding='utf-8').read()))
+# open('ncm.session', 'w+').write(pyncm.DumpSessionAsString(pyncm.GetCurrentSession()))
+pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open('ncm.session', 'r', encoding='utf-8').read()))
 
 app = Client('musicbot', bot_token='',
 	api_id='', api_hash='')
 
+allow_chat_id = [ ]
+cache_chat_id = 
+
+MUSIC_CACHE_DB = 'db/mcache.db'
+MV_CACHE_DB = 'db/mcache.db'
+PROCESS_LOCK = 'locks/process.lock'
 
 # MiguCookies = { 'migu_music_sid': '' }
 MiguHeaders = {'origin': 'http://music.migu.cn/', 'referer': 'http://m.music.migu.cn/v3/',
@@ -88,6 +93,17 @@ def GetKuwoJsonItem(content, item):
 			count += 1
 	return False
 
+def set_lock(FILE):
+	file = open(FILE, 'a')
+	fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+	return file
+
+def set_multi_lock(FILE):
+	thread = str(random.randint(1,4))
+	file = open(FILE + thread, 'a')
+	fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+	return file
+
 def upload_music(info, msg_id, orig_msg_id, chat_id):
 	'''
 	Info:
@@ -116,44 +132,6 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 	song_url = info[9]
 	song_link = info[10]
 	album_link = info[11]
-
-	currenct_timestamp = str(round(time.time() * 1000))
-
-	downloading_song_message = 'Platform: %s\n' % platform
-	downloading_song_message += 'Song ID: %s\n' % song_id
-	downloading_song_message += 'Song name: %s\n' % song_name
-	if song_alias: downloading_song_message += 'Song alias name: %s\n' % song_alias
-	downloading_song_message += 'Song singer(s): %s' % song_singers
-	app.edit_message_text(chat_id, msg_id, 'Start downloading music...\n\nMusic information:\n' + downloading_song_message)
-	song_file = '/tmp/telegram-%s-%s-%s.%s' % (platform, song_id, currenct_timestamp, song_type)
-	try:
-		wget.download(urldecode(song_url), song_file)
-	except:
-		app.edit_message_text(chat_id, msg_id, 'Failed to download music.\n\nSong URL: ' + song_url)
-		return
-
-	downloading_album_message = 'Platform: %s\n' % platform
-	downloading_album_message += 'Album ID: %s\n' % album_id
-	downloading_album_message += 'Album name: %s' % album_name
-	album_file = '/tmp/telegram-%s-%s-%s.jpg' % (platform, album_id, currenct_timestamp)
-	app.edit_message_text(chat_id, msg_id, 'Start downloading album...\n\nAlbum information:\n' + downloading_album_message)
-	try:
-		wget.download(album_url, album_file)
-	except:
-		app.edit_message_text(chat_id, msg_id, 'Failed to download album.\n\nAlbum URL: ' + album_url)
-		return
-
-	song_info = tinytag.get(song_file)
-	song_bitrate = song_info.bitrate
-	song_duration = int(song_info.duration)
-	song_size = song_info.filesize
-	song_caption = 'Platform: %s\n' % platform
-	song_caption += 'Song ID: %s\n' % song_id
-	song_caption += 'Song name: %s\n' % song_name
-	if song_alias: song_caption += 'Song alias name: %s\n' % song_alias
-	song_caption += 'Song singer(s): %s\n' % song_singers
-	song_caption += 'Album name: %s\n' % album_name
-	song_caption += 'Bitrate: %.f Kbps' % song_bitrate
 	song_reply_markup = InlineKeyboardMarkup(
 		[
 			[
@@ -170,17 +148,171 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 			]
 		]
 	)
+
+	app.edit_message_text(chat_id, msg_id, 'Wait download lock...')
+	album_lock = 'locks/%s.lock' % album_id
+	lock = set_lock(album_lock)
+
+	cache_db = pickledb.load(MUSIC_CACHE_DB, True)
+	cached_msgid = cache_db.get('%s_%s' % (platform, song_id))
+	if cached_msgid:
+		try:
+			app.copy_message(chat_id, cache_chat_id, cached_msgid, reply_markup=song_reply_markup)
+			try: app.delete_messages(chat_id, msg_id)
+			except: None
+			return
+		except:
+			None
+
+	downloading_album_message = 'Platform: %s\n' % platform
+	downloading_album_message += 'Album ID: %s\n' % album_id
+	downloading_album_message += 'Album name: %s' % album_name
+	album_file = 'songs/%s-%s.jpg' % (platform, album_id)
+	app.edit_message_text(chat_id, msg_id, 'Start downloading album...\n\nAlbum information:\n' + downloading_album_message)
 	try:
-		app.edit_message_text(chat_id, msg_id, 'Uploading music...\n\nSong size: %s' % format_size(song_size))
-		app.send_audio(chat_id, audio=song_file, reply_to_message_id=orig_msg_id, caption=song_caption, duration=song_duration,
-			performer=song_singers, title=song_name, thumb=album_file, file_name='%s - %s.%s' % (song_singers, song_name, song_type),
-				reply_markup=song_reply_markup)
-		app.delete_messages(chat_id, msg_id)
+		wget.download(album_url, album_file)
 	except:
-		app.edit_message_text(chat_id, msg_id, 'Failed to upload music.\n\nSong URL: %s\nAlbum URL: %s' %
-			(song_url, album_url))
-	os.remove(song_file)
-	os.remove(album_file)
+		app.edit_message_text(chat_id, msg_id, 'Failed to download album.\n\nAlbum URL: ' + album_url)
+		return
+
+	downloading_song_message = 'Platform: %s\n' % platform
+	downloading_song_message += 'Song ID: %s\n' % song_id
+	downloading_song_message += 'Song name: %s\n' % song_name
+	if song_alias: downloading_song_message += 'Song alias name: %s\n' % song_alias
+	downloading_song_message += 'Song singer(s): %s' % song_singers
+	song_file = 'songs/%s-%s.%s' % (platform, song_id, song_type)
+	app.edit_message_text(chat_id, msg_id, 'Start downloading music...\n\nMusic information:\n' + downloading_song_message)
+	try:
+		wget.download(urldecode(song_url), song_file)
+	except:
+		app.edit_message_text(chat_id, msg_id, 'Failed to download music.\n\nSong URL: ' + song_url)
+		return
+
+	song_info = tinytag.get(song_file)
+	song_bitrate = song_info.bitrate
+	song_duration = int(song_info.duration)
+	song_size = song_info.filesize
+	song_caption = downloading_song_message
+	song_caption += '\n'
+	song_caption += 'Album name: %s\n' % album_name
+	song_caption += 'Bitrate: %.f Kbps' % song_bitrate
+	app.edit_message_text(chat_id, msg_id, 'Uploading music...\n\nSong size: %s' % format_size(song_size))
+	try:
+		song_msg_id = app.send_audio(cache_chat_id, audio=song_file, reply_to_message_id=orig_msg_id, caption=song_caption,
+			duration=song_duration, performer=song_singers, title=song_name, thumb=album_file,
+				file_name='%s - %s.%s' % (song_singers, song_name, song_type), reply_markup=song_reply_markup).message_id
+		app.copy_message(chat_id, cache_chat_id, song_msg_id, reply_markup=song_reply_markup)
+	except:
+		app.edit_message_text(chat_id, msg_id, 'Failed to upload music.\n\nAlbum URL: %s\nSong URL: %s' %
+			(album_url, song_url))
+
+	cache_db.set('%s_%s' % (platform, song_id), song_msg_id)
+
+	try: app.delete_messages(chat_id, msg_id)
+	except: None
+	try: os.remove(album_file)
+	except: None
+	try: os.remove(song_file)
+	except: None
+
+	lock.close()
+	os.remove(album_lock)
+
+def upload_mv(info, msg_id, orig_msg_id, chat_id):
+	'''
+	Info:
+	0. Platform
+	1. MV ID
+	2. MV name
+	3. Artist(s)
+	4. Cover ID
+	5. Cover picURL
+	6. MV playURL
+	7. MV detail URL
+	'''
+	platform = info[0]
+	mv_id = info[1]
+	mv_name = info[2]
+	mv_artists = info[3]
+	cover_id = info[4]
+	cover_url = info[5]
+	mv_url = info[6]
+	mv_link = info[7]
+	mv_reply_markup = InlineKeyboardMarkup(
+		[
+			[
+				InlineKeyboardButton(
+					'MV: ' + mv_name,
+					url=mv_link
+				)
+			]
+		]
+	)
+
+	app.edit_message_text(chat_id, msg_id, 'Wait download lock...')
+	mv_lock = 'locks/%s.lock' % mv_id
+	lock = set_lock(mv_lock)
+
+	cache_db = pickledb.load(MV_CACHE_DB, True)
+	cached_msgid = cache_db.get('%s_%s' % (platform, mv_id))
+	if cached_msgid:
+		try:
+			app.copy_message(chat_id, cache_chat_id, cached_msgid, reply_markup=mv_reply_markup)
+			try: app.delete_messages(chat_id, msg_id)
+			except: None
+			return
+		except:
+			None
+
+	downloading_cover_message = 'Platform: %s\n' % platform
+	downloading_cover_message += 'Cover ID: %s\n' % cover_id
+	cover_file = 'mvs/%s-%s.jpg' % (platform, cover_id)
+	app.edit_message_text(chat_id, msg_id, 'Start downloading cover...\n\nCover information:\n' + downloading_cover_message)
+	try:
+		wget.download(cover_url, cover_file)
+	except:
+		app.edit_message_text(chat_id, msg_id, 'Failed to download cover.\n\nCover URL: ' + cover_url)
+		return
+
+	downloading_mv_message = 'Platform: %s\n' % platform
+	downloading_mv_message += 'MV ID: %s\n' % mv_id
+	downloading_mv_message += 'MV name: %s\n' % mv_name
+	downloading_mv_message += 'MV artist(s): %s' % mv_artists
+	mv_file = 'mvs/%s-%s.mp4' % (platform, mv_id)
+	app.edit_message_text(chat_id, msg_id, 'Start downloading MV...\n\nMV information:\n' + downloading_mv_message)
+	try:
+		wget.download(urldecode(mv_url), mv_file)
+	except:
+		app.edit_message_text(chat_id, msg_id, 'Failed to download MV.\n\nMV URL: ' + mv_url)
+		return
+
+	mv_info = cv2.VideoCapture(mv_file)
+	mv_duration = int(mv_info.get(cv2.CAP_PROP_FRAME_COUNT) / mv_info.get(cv2.CAP_PROP_FPS))
+	mv_height = int(mv_info.get(cv2.CAP_PROP_FRAME_HEIGHT))
+	mv_width = int(mv_info.get(cv2.CAP_PROP_FRAME_WIDTH))
+	mv_size = os.path.getsize(mv_file)
+	mv_caption = downloading_mv_message
+	app.edit_message_text(chat_id, msg_id, 'Uploading MV...\n\nVideo size: %s' % format_size(mv_size))
+	try:
+		mv_msg_id = app.send_video(cache_chat_id, video=mv_file, reply_to_message_id=orig_msg_id, caption=mv_caption,
+		duration=mv_duration, height=mv_height, width=mv_width, thumb=cover_file, file_name='%s - %s.mp4' % (mv_artists, mv_name),
+			supports_streaming=True, reply_markup=mv_reply_markup).message_id
+		app.copy_message(chat_id, cache_chat_id, mv_msg_id, reply_markup=mv_reply_markup)
+	except:
+		app.edit_message_text(chat_id, msg_id, 'Failed to upload MV.\n\nCover URL: %s\nMV URL: %s' %
+			(cover_url, mv_url))
+
+	cache_db.set('%s_%s' % (platform, mv_id), mv_msg_id)
+
+	try: app.delete_messages(chat_id, msg_id)
+	except: None
+	try: os.remove(cover_file)
+	except: None
+	try: os.remove(mv_file)
+	except: None
+
+	lock.close()
+	os.remove(mv_lock)
 
 def get_kuwo_music(musicId, msg_id, chat_id):
 	''' Cannot get albumID
@@ -212,14 +344,14 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 	music_default_img = 'https://h5static.kuwo.cn/upload/image/4f768883f75b17a426c95b93692d98bec7d3ee9240f77f5ea68fc63870fdb050.png'
 	music_pack_info = [ ]
 	music_pack_info.append('kuwo')
-	music_pack_info.append(str(musicId))
+	music_pack_info.append(musicId)
 	# music_pack_info.append(GetMiddleStr(music_info, '<name>', '</name>'))
 	music_pack_info.append(music_info.get('data').get('songinfo').get('songName'))
 	music_pack_info.append(None)
 	# music_pack_info.append(GetMiddleStr(music_info, '<singer>', '</singer>'))
 	music_pack_info.append(music_info.get('data').get('songinfo').get('artist'))
-	music_pack_info.append(music_info.get('data').get('songinfo').get('albumId'))
-	music_pack_info.append(music_info.get('data').get('songinfo').get('album'))
+	music_pack_info.append(str(music_info.get('data').get('songinfo').get('albumId')))
+	music_pack_info.append(music_info.get('data').get('songinfo').get('album') or 'None')
 	'''
 	music_album_url = requests.get('http://artistpicserver.kuwo.cn/pic.web?corp=kuwo&type=rid_pic&pictype=url&' +
 		'content=list&size=320x320&rid=%s' % musicId).text
@@ -231,7 +363,7 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 	music_pack_info.append(music_info.get('data').get('songinfo').get('pic') or music_default_img)
 	music_pack_info.append(re.findall('flac|mp3', music_source)[0])
 	music_pack_info.append(re.findall('http[^\s$"]+', music_source)[0])
-	music_pack_info.append('https://www.kuwo.cn/play_detail/' + str(musicId))
+	music_pack_info.append('https://www.kuwo.cn/play_detail/' + musicId)
 	music_pack_info.append('https://www.kuwo.cn/album_detail/' + str(music_pack_info[5]))
 	return music_pack_info
 
@@ -289,7 +421,7 @@ def get_migu_music(musicId, msg_id, chat_id):
 
 	music_pack_info = [ ]
 	music_pack_info.append('migu')
-	music_pack_info.append(str(musicId))
+	music_pack_info.append(musicId)
 	music_pack_info.append(music_info.get('data').get('songName'))
 	music_pack_info.append(None)
 	music_pack_info.append(' / '.join(music_info.get('data').get('singerName')))
@@ -298,7 +430,7 @@ def get_migu_music(musicId, msg_id, chat_id):
 	music_pack_info.append(music_info.get('data').get('picS'))
 	music_pack_info.append(re.findall('flac|mp3', music_source.get('data').get('url'))[0])
 	music_pack_info.append(music_source.get('data').get('url'))
-	music_pack_info.append('https://music.migu.cn/v3/music/song/' + str(musicId))
+	music_pack_info.append('https://music.migu.cn/v3/music/song/' + musicId)
 	music_pack_info.append('https://music.migu.cn/v3/music/album/' + str(music_pack_info[5]))
 	return music_pack_info
 
@@ -329,7 +461,7 @@ def get_netease_music(musicId, msg_id, chat_id):
 	music_singers = str()
 	music_pack_info = [ ]
 	music_pack_info.append('netease')
-	music_pack_info.append(str(musicId))
+	music_pack_info.append(musicId)
 	music_pack_info.append(music_info.get('songs')[0].get('name'))
 	if len(music_info.get('songs')[0].get('alia')) > 0:
 		music_pack_info.append(' / '.join(music_info.get('songs')[0].get('alia')))
@@ -337,7 +469,7 @@ def get_netease_music(musicId, msg_id, chat_id):
 		music_pack_info.append(None)
 	while num < len(music_info.get('songs')[0].get('ar')):
 		if not music_singers:
-			music_singers = (music_info.get('songs')[0].get('ar')[num].get('name'))
+			music_singers = music_info.get('songs')[0].get('ar')[num].get('name')
 		else:
 			music_singers += ' / ' + music_info.get('songs')[0].get('ar')[num].get('name')
 		num += 1
@@ -347,20 +479,65 @@ def get_netease_music(musicId, msg_id, chat_id):
 	music_pack_info.append(music_info.get('songs')[0].get('al').get('picUrl') + '?param=320x320')
 	music_pack_info.append(music_source.get('data')[0].get('type'))
 	music_pack_info.append(music_source.get('data')[0].get('url'))
-	music_pack_info.append('https://music.163.com/#/song?id=' + str(musicId))
+	music_pack_info.append('https://music.163.com/#/song?id=' + musicId)
 	music_pack_info.append('https://music.163.com/#/album?id=' + str(music_pack_info[5]))
 	return music_pack_info
 
-@app.on_message(filters.command('kuwo', case_sensitive=True))
+def get_netease_mv(mvId, msg_id, chat_id):
+	mv_info = ncmmvtrack.GetMVDetail(mvId)
+	if not mv_info.ok:
+		app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
+		return False
+	else:
+		mv_info.encoding = 'utf-8'
+		mv_info = json.loads(json.loads(json.dumps(mv_info.text)))
+		if mv_info.get('code') != 200:
+			app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
+			return False
+
+	mv_source = ncmmvtrack.GetMVResource(mvId, res=1080)
+	if not mv_source.ok:
+		app.edit_message_text(chat_id, msg_id, 'Failed to get MV playurl.')
+		return False
+	else:
+		mv_source.encoding = 'utf-8'
+		mv_source = json.loads(json.loads(json.dumps(mv_source.text)))
+		if (mv_source.get('code') != 200):
+			app.edit_message_text(chat_id, msg_id, 'Failed to get MV playurl.')
+			return False
+
+	num = int()
+	mv_artists = str()
+	mv_pack_info = [ ]
+	mv_pack_info.append('netease')
+	mv_pack_info.append(mvId)
+	mv_pack_info.append(mv_info.get('data').get('name'))
+	while num < len(mv_info.get('data').get('artists')):
+		if not mv_artists:
+			mv_artists = mv_info.get('data').get('artists')[num].get('name')
+		else:
+			mv_artists += ' / ' + mv_info.get('data').get('artists')[num].get('name')
+		num += 1
+	mv_pack_info.append(mv_artists)
+	mv_pack_info.append(str(mv_info.get('data').get('coverId')))
+	mv_pack_info.append(mv_info.get('data').get('cover'))
+	mv_pack_info.append(mv_source.get('data').get('url'))
+	mv_pack_info.append('https://music.163.com/#/mv?id=' + str(mv_pack_info[4]))
+	return mv_pack_info
+
+@app.on_message(filters.command(['kuwo'], case_sensitive=True) & filters.chat(allow_chat_id))
 def kuwo_command(client, message):
 	kuwo_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not kuwo_musicinfo:
 		message.reply_text('Usage: /kuwo musicrId|keyword', quote=True)
 		return
 
+	original_message_id = message.message_id
+	update_message_id = message.reply_text('Wait process lock...', quote=True).message_id
+	lock = set_multi_lock(PROCESS_LOCK)
+
 	if not str.isdigit(kuwo_musicinfo):
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Searching music information...', quote=True).message_id
+		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
 
 		keyword = urlencode(kuwo_musicinfo)
 		# search_info = requests.get('http://search.kuwo.cn/r.s?SONGNAME=%s&ft=music&rformat=json&encoding=utf8&rn=1')
@@ -377,7 +554,6 @@ def kuwo_command(client, message):
 			# if (int(GetKuwoJsonItem(search_info, 'HIT') == 0) or (int(GetKuwoJsonItem(search_info, 'TOTAL')) < 1):
 			if (search_info.get('code') != 200) or (int(search_info.get('data').get('total')) < 1):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-				return
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
@@ -387,24 +563,27 @@ def kuwo_command(client, message):
 				if kuwo_info: upload_music(kuwo_info, update_message_id, original_message_id, message.chat.id)
 		else:
 			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-			return
 	else:
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Getting music information...', quote=True).message_id
+		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
 		kuwo_info = get_kuwo_music(kuwo_musicinfo, update_message_id, message.chat.id)
 		if kuwo_info: upload_music(kuwo_info, update_message_id, original_message_id, message.chat.id)
 
-@app.on_message(filters.command('migu', case_sensitive=True))
+	lock.close()
+
+@app.on_message(filters.command(['migu'], case_sensitive=True) & filters.chat(allow_chat_id))
 def migu_command(client, message):
 	migu_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not migu_musicinfo:
 		message.reply_text('Usage: /migu copyrightId|keyword', quote=True)
 		return
 
+	original_message_id = message.message_id
+	update_message_id = message.reply_text('Wait process lock...', quote=True).message_id
+	lock = set_multi_lock(PROCESS_LOCK)
+
 	if not str.isdigit(migu_musicinfo):
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Searching music information...', quote=True).message_id
+		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
 
 		search_info = requests.get('http://m.music.migu.cn/migu/remoting/scr_search_tag?keyword=%s&type=2&rows=1&pgc=1' \
 			% urlencode(migu_musicinfo), headers=MiguHeaders)
@@ -413,56 +592,94 @@ def migu_command(client, message):
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
 			if (not search_info.get('success')) or (not search_info.get('pgt')):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-				return
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
-				migu_musicid = search_info.get('musics')[0].get('copyrightId')
+				migu_musicid = str(search_info.get('musics')[0].get('copyrightId'))
 				migu_info = get_migu_music(migu_musicid, update_message_id, message.chat.id)
 				if migu_info: upload_music(migu_info, update_message_id, original_message_id, message.chat.id)
 		else:
 			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-			return
 	else:
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Getting music information...', quote=True).message_id
+		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
 		migu_info = get_migu_music(migu_musicinfo, update_message_id, message.chat.id)
 		if migu_info: upload_music(migu_info, update_message_id, original_message_id, message.chat.id)
 
-@app.on_message(filters.command('netease', case_sensitive=True))
+	lock.close()
+
+@app.on_message(filters.command(['netease'], case_sensitive=True) & filters.chat(allow_chat_id))
 def netease_command(client, message):
 	netease_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not netease_musicinfo:
 		message.reply_text('Usage: /netease songId|keyword', quote=True)
 		return
 
-	if not str.isdigit(netease_musicinfo):
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Searching music information...', quote=True).message_id
+	original_message_id = message.message_id
+	update_message_id = message.reply_text('Wait process lock...', quote=True).message_id
+	lock = set_multi_lock(PROCESS_LOCK)
 
-		# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_musicinfo), type=1, limit=1, offset=0)
+	if not str.isdigit(netease_musicinfo):
+		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
+
+		# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_musicinfo), type=ncmsearch.TYPE_SONG, limit=1, offset=0)
 		search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1&limit=1&offset=0' % urlencode(netease_musicinfo))
 		if (search_info.ok and search_info.text):
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
 			if (search_info.get('code') != 200) or (search_info.get('result').get('songCount') < 1):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-				return
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
-				netease_musicid = search_info.get('result').get('songs')[0].get('id')
+				netease_musicid = str(search_info.get('result').get('songs')[0].get('id'))
 				netease_info = get_netease_music(netease_musicid, update_message_id, message.chat.id)
 				if netease_info: upload_music(netease_info, update_message_id, original_message_id, message.chat.id)
 		else:
 			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
-			return
 	else:
-		original_message_id = message.message_id
-		update_message_id = message.reply_text('Getting music information...', quote=True).message_id
+		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
 		netease_info = get_netease_music(netease_musicinfo, update_message_id, message.chat.id)
 		if netease_info: upload_music(netease_info, update_message_id, original_message_id, message.chat.id)
+
+	lock.close()
+
+@app.on_message(filters.command(['neteasemv'], case_sensitive=True) & filters.chat(allow_chat_id))
+def neteasemv_command(client, message):
+	netease_mvinfo = ' '.join(message.text.split(' ')[1:])
+	if not netease_mvinfo:
+		message.reply_text('Usage: /neteasemv mvId|keyword', quote=True)
+		return
+
+	original_message_id = message.message_id
+	update_message_id = message.reply_text('Wait process lock...', quote=True).message_id
+	lock = set_multi_lock(PROCESS_LOCK)
+
+	if not str.isdigit(netease_mvinfo):
+		app.edit_message_text(message.chat.id, update_message_id, 'Searching MV information...')
+
+		# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_mvinfo), type=ncmsearch.TYPE_MV, limit=1, offset=0)
+		search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1004&limit=1&offset=0' % urlencode(netease_mvinfo))
+		if (search_info.ok and search_info.text):
+			search_info.encoding = 'utf-8'
+			search_info = json.loads(json.loads(json.dumps(search_info.text)))
+			if (search_info.get('code') != 200) or (search_info.get('result').get('songCount') < 1):
+				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
+			else:
+				app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
+
+				netease_mvid = str(search_info.get('result').get('mvs')[0].get('id'))
+				netease_info = get_netease_mv(netease_mvid, update_message_id, message.chat.id)
+				if netease_info: upload_mv(netease_info, update_message_id, original_message_id, message.chat.id)
+		else:
+			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
+	else:
+		app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
+
+		netease_info = get_netease_mv(netease_mvinfo, update_message_id, message.chat.id)
+		if netease_info: upload_mv(netease_info, update_message_id, original_message_id, message.chat.id)
+
+	lock.close()
 
 app.run()
