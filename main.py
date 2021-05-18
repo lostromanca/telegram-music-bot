@@ -522,7 +522,7 @@ def get_netease_mv(mvId, msg_id, chat_id):
 	mv_pack_info.append(str(mv_info.get('data').get('coverId')))
 	mv_pack_info.append(mv_info.get('data').get('cover'))
 	mv_pack_info.append(mv_source.get('data').get('url'))
-	mv_pack_info.append('https://music.163.com/#/mv?id=' + str(mv_pack_info[4]))
+	mv_pack_info.append('https://music.163.com/#/mv?id=' + mvId)
 	return mv_pack_info
 
 @app.on_message(filters.command(['kuwo'], case_sensitive=True) & filters.chat(allow_chat_id))
@@ -664,7 +664,7 @@ def neteasemv_command(client, message):
 		if (search_info.ok and search_info.text):
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
-			if (search_info.get('code') != 200) or (search_info.get('result').get('songCount') < 1):
+			if (search_info.get('code') != 200) or (search_info.get('result').get('mvCount') < 1):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
