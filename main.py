@@ -38,7 +38,7 @@ from urllib.parse import unquote as urldecode
 # open('ncm.session', 'w+').write(pyncm.DumpSessionAsString(pyncm.GetCurrentSession()))
 pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open('ncm.session', 'r', encoding='utf-8').read()))
 
-app = Client('musicbot', bot_token='',
+app = Client('', bot_token='',
 	api_id='', api_hash='')
 
 allow_chat_id = [ ]
@@ -66,11 +66,11 @@ def format_size(B):
 		MiB = KiB / 1024
 		if MiB >= 1024:
 			GiB = MiB / 1024
-			return '%.3f GiB' % GiB
+			return '%.2f GiB' % GiB
 		else:
-			return '%.3f MiB' % MiB
+			return '%.2f MiB' % MiB
 	else:
-		return '%.3f KiB' % KiB
+		return '%.2f KiB' % KiB
 
 def GetMiddleStr(content, startStr, endStr):
 	startIndex = content.index(startStr)
@@ -103,6 +103,33 @@ def set_multi_lock(FILE):
 	file = open(FILE + thread, 'a')
 	fcntl.flock(file.fileno(), fcntl.LOCK_EX)
 	return file
+
+def download_file(url, file, msg, msg_id, chat_id):
+	headers = { 'Proxy-Connection': 'keep-alive' }
+	request_data = requests.get(url, stream=True, headers=headers)
+	file_size = float(request_data.headers['content-length'])
+	app.edit_message_text(chat_id, msg_id, '%s\n\n0%% of total %s, speed: 0/s' % (msg, format_size(file_size)))
+
+	save_file = open(file, 'wb')
+	count = 0
+	count_tmp = 0
+	start_time = time.time()
+	try:
+		for chunk in request_data.iter_content(chunk_size = 1024):
+			if chunk:
+				save_file.write(chunk)
+				count += len(chunk)
+				if time.time() - start_time > 4:
+					progress = count / file_size * 100
+					down_speed = (count - count_tmp) / 2
+					count_tmp = count
+					app.edit_message_text(chat_id, msg_id, '%s\n\n%.2f%% of total %s, speed: %s/s' % (msg, progress, format_size(file_size),
+						format_size(down_speed)))
+					start_time = time.time()
+		save_file.close()
+	except:
+		return False
+	return True
 
 def upload_music(info, msg_id, orig_msg_id, chat_id):
 	'''
@@ -160,31 +187,27 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 			app.copy_message(chat_id, cache_chat_id, cached_msgid, reply_markup=song_reply_markup)
 			try: app.delete_messages(chat_id, msg_id)
 			except: None
+			lock.close()
+			os.remove(album_lock)
 			return
 		except:
 			None
 
-	downloading_album_message = 'Platform: %s\n' % platform
+	downloading_album_message = 'Start downloading album...\n\nAlbum information:\n'
 	downloading_album_message += 'Album ID: %s\n' % album_id
 	downloading_album_message += 'Album name: %s' % album_name
 	album_file = 'songs/%s-%s.jpg' % (platform, album_id)
-	app.edit_message_text(chat_id, msg_id, 'Start downloading album...\n\nAlbum information:\n' + downloading_album_message)
-	try:
-		wget.download(album_url, album_file)
-	except:
+	if not download_file(album_url, album_file, downloading_album_message, msg_id, chat_id):
 		app.edit_message_text(chat_id, msg_id, 'Failed to download album.\n\nAlbum URL: ' + album_url)
 		return
 
-	downloading_song_message = 'Platform: %s\n' % platform
+	downloading_song_message = 'Start downloading music...\n\nMusic information:\n'
 	downloading_song_message += 'Song ID: %s\n' % song_id
 	downloading_song_message += 'Song name: %s\n' % song_name
-	if song_alias: downloading_song_message += 'Song alias name: %s\n' % song_alias
 	downloading_song_message += 'Song singer(s): %s' % song_singers
 	song_file = 'songs/%s-%s.%s' % (platform, song_id, song_type)
-	app.edit_message_text(chat_id, msg_id, 'Start downloading music...\n\nMusic information:\n' + downloading_song_message)
-	try:
-		wget.download(urldecode(song_url), song_file)
-	except:
+	app.edit_message_text(chat_id, msg_id, downloading_song_message)
+	if not download_file(urldecode(song_url), song_file, downloading_album_message, msg_id, chat_id):
 		app.edit_message_text(chat_id, msg_id, 'Failed to download music.\n\nSong URL: ' + song_url)
 		return
 
@@ -192,8 +215,11 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 	song_bitrate = song_info.bitrate
 	song_duration = int(song_info.duration)
 	song_size = song_info.filesize
-	song_caption = downloading_song_message
-	song_caption += '\n'
+	song_caption = 'Platform: %s\n' % platform
+	song_caption += 'Song ID: %s\n' % song_id
+	song_caption += 'Song name: %s\n' % song_name
+	if song_alias: song_caption += 'Song alias name: %s\n' % song_alias
+	song_caption += 'Song singer(s): %s\n' % song_singers
 	song_caption += 'Album name: %s\n' % album_name
 	song_caption += 'Bitrate: %.f Kbps' % song_bitrate
 	app.edit_message_text(chat_id, msg_id, 'Uploading music...\n\nSong size: %s' % format_size(song_size))
@@ -264,25 +290,20 @@ def upload_mv(info, msg_id, orig_msg_id, chat_id):
 		except:
 			None
 
-	downloading_cover_message = 'Platform: %s\n' % platform
-	downloading_cover_message += 'Cover ID: %s\n' % cover_id
+	downloading_cover_message = 'Start downloading cover...\n\nCover information:\n'
+	downloading_cover_message += 'Platform: %s\n' % platform
+	downloading_cover_message += 'Cover ID: %s' % cover_id
 	cover_file = 'mvs/%s-%s.jpg' % (platform, cover_id)
-	app.edit_message_text(chat_id, msg_id, 'Start downloading cover...\n\nCover information:\n' + downloading_cover_message)
-	try:
-		wget.download(cover_url, cover_file)
-	except:
+	if not download_file(cover_url, cover_file, downloading_cover_message, msg_id, chat_id):
 		app.edit_message_text(chat_id, msg_id, 'Failed to download cover.\n\nCover URL: ' + cover_url)
 		return
 
-	downloading_mv_message = 'Platform: %s\n' % platform
+	downloading_mv_message = 'Start downloading MV...\n\nMV information:\n'
 	downloading_mv_message += 'MV ID: %s\n' % mv_id
 	downloading_mv_message += 'MV name: %s\n' % mv_name
 	downloading_mv_message += 'MV artist(s): %s' % mv_artists
 	mv_file = 'mvs/%s-%s.mp4' % (platform, mv_id)
-	app.edit_message_text(chat_id, msg_id, 'Start downloading MV...\n\nMV information:\n' + downloading_mv_message)
-	try:
-		wget.download(urldecode(mv_url), mv_file)
-	except:
+	if not download_file(mv_url, mv_file, downloading_mv_message, msg_id, chat_id):
 		app.edit_message_text(chat_id, msg_id, 'Failed to download MV.\n\nMV URL: ' + mv_url)
 		return
 
@@ -291,7 +312,10 @@ def upload_mv(info, msg_id, orig_msg_id, chat_id):
 	mv_height = int(mv_info.get(cv2.CAP_PROP_FRAME_HEIGHT))
 	mv_width = int(mv_info.get(cv2.CAP_PROP_FRAME_WIDTH))
 	mv_size = os.path.getsize(mv_file)
-	mv_caption = downloading_mv_message
+	mv_caption = 'Platform: %s\n' % platform
+	mv_caption += 'MV ID: %s\n' % mv_id
+	mv_caption += 'MV name: %s\n' % mv_name
+	mv_caption += 'MV artist(s): %s' % mv_artists
 	app.edit_message_text(chat_id, msg_id, 'Uploading MV...\n\nVideo size: %s' % format_size(mv_size))
 	try:
 		mv_msg_id = app.send_video(cache_chat_id, video=mv_file, reply_to_message_id=orig_msg_id, caption=mv_caption,
