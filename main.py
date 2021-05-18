@@ -121,7 +121,7 @@ def download_file(url, file, msg, msg_id, chat_id):
 				count += len(chunk)
 				if time.time() - start_time > 4:
 					progress = count / file_size * 100
-					down_speed = (count - count_tmp) / 2
+					down_speed = (count - count_tmp) / 5
 					count_tmp = count
 					app.edit_message_text(chat_id, msg_id, '%s\n\n%.2f%% of total %s, speed: %s/s' % (msg, progress, format_size(file_size),
 						format_size(down_speed)))
