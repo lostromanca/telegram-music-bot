@@ -107,7 +107,7 @@ def set_multi_lock(FILE):
 def download_file(url, file, msg, msg_id, chat_id):
 	headers = { 'Proxy-Connection': 'keep-alive' }
 	request_data = requests.get(url, stream=True, headers=headers)
-	file_size = float(request_data.headers['content-length'])
+	file_size = float(request_data.headers.get('content-length') or 0)
 	app.edit_message_text(chat_id, msg_id, '%s\n\n0%% of total %s, speed: 0/s' % (msg, format_size(file_size)))
 
 	save_file = open(file, 'wb')
@@ -115,7 +115,7 @@ def download_file(url, file, msg, msg_id, chat_id):
 	count_tmp = 0
 	start_time = time.time()
 	try:
-		for chunk in request_data.iter_content(chunk_size = 1024):
+		for chunk in request_data.iter_content(chunk_size=1024):
 			if chunk:
 				save_file.write(chunk)
 				count += len(chunk)
@@ -206,8 +206,7 @@ def upload_music(info, msg_id, orig_msg_id, chat_id):
 	downloading_song_message += 'Song name: %s\n' % song_name
 	downloading_song_message += 'Song singer(s): %s' % song_singers
 	song_file = 'songs/%s-%s.%s' % (platform, song_id, song_type)
-	app.edit_message_text(chat_id, msg_id, downloading_song_message)
-	if not download_file(urldecode(song_url), song_file, downloading_album_message, msg_id, chat_id):
+	if not download_file(urldecode(song_url), song_file, downloading_song_message, msg_id, chat_id):
 		app.edit_message_text(chat_id, msg_id, 'Failed to download music.\n\nSong URL: ' + song_url)
 		return
 
