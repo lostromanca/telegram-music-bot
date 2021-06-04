@@ -459,26 +459,14 @@ def get_migu_music(musicId, msg_id, chat_id):
 
 def get_netease_music(musicId, msg_id, chat_id):
 	music_info = ncmtrack.GetTrackDetail(musicId)
-	if not music_info.ok:
+	if music_info.get('code') != 200:
 		app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
 		return False
-	else:
-		music_info.encoding = 'utf-8'
-		music_info = json.loads(json.loads(json.dumps(music_info.text)))
-		if music_info.get('code') != 200:
-			app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
-			return False
 
 	music_source = ncmtrack.GetTrackAudio(musicId, bitrate=999000)
-	if not music_source.ok:
+	if (music_source.get('code') != 200) or (music_source.get('data')[0].get('code') != 200):
 		app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
 		return False
-	else:
-		music_source.encoding = 'utf-8'
-		music_source = json.loads(json.loads(json.dumps(music_source.text)))
-		if (music_source.get('code') != 200) or (music_source.get('data')[0].get('code') != 200):
-			app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
-			return False
 
 	num = int()
 	music_singers = str()
@@ -508,15 +496,9 @@ def get_netease_music(musicId, msg_id, chat_id):
 
 def get_netease_mv(mvId, msg_id, chat_id):
 	mv_info = ncmmvtrack.GetMVDetail(mvId)
-	if not mv_info.ok:
+	if mv_info.get('code') != 200:
 		app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
 		return False
-	else:
-		mv_info.encoding = 'utf-8'
-		mv_info = json.loads(json.loads(json.dumps(mv_info.text)))
-		if mv_info.get('code') != 200:
-			app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
-			return False
 
 	mv_source = ncmmvtrack.GetMVResource(mvId, res=1080)
 	if not mv_source.ok:
