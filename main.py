@@ -632,7 +632,7 @@ def netease_command(client, message):
 		if (search_info.ok and search_info.text):
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
-			if (search_info.get('code') != 200) or (search_info.get('result').get('songCount') < 1):
+			if (search_info.get('code') != 200) or (not search_info.get('result').get('songCount')):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
@@ -669,7 +669,7 @@ def neteasemv_command(client, message):
 		if (search_info.ok and search_info.text):
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
-			if (search_info.get('code') != 200) or (search_info.get('result').get('mvCount') < 1):
+			if (search_info.get('code') != 200) or (not search_info.get('result').get('mvCount')):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
