@@ -17,8 +17,7 @@ import os
 import pickledb
 import pyncm
 import random, re, requests
-# import socket
-import string
+import socket, string
 # import subprocess
 import time
 import wget
@@ -30,7 +29,9 @@ from pyncm.apis import video as ncmmvtrack
 from pyrogram import filters, Client
 from pyrogram.errors.exceptions.bad_request_400 import MessageIdInvalid
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from socket import getaddrinfo, AF_INET, AF_INET6
 from tinytag import TinyTag as tinytag
+from unittest.mock import patch as ipvxpatch
 from urllib.parse import quote as urlencode
 from urllib.parse import unquote as urldecode
 
@@ -38,7 +39,7 @@ from urllib.parse import unquote as urldecode
 # open('ncm.session', 'w+').write(pyncm.DumpSessionAsString(pyncm.GetCurrentSession()))
 pyncm.SetCurrentSession(pyncm.LoadSessionFromString(open('ncm.session', 'r', encoding='utf-8').read()))
 
-app = Client('', bot_token='',
+app = Client('musicbot', bot_token='',
 	api_id='', api_hash='')
 
 allow_chat_id = [ ]
@@ -54,7 +55,7 @@ MiguHeaders = {'origin': 'http://music.migu.cn/', 'referer': 'http://m.music.mig
 	'aversionid': ''}
 
 GlobalProxies = {'http': '',
-	'https': ''}
+	'https': 'socks5://'}
 
 def format_size(B):
 	try:
@@ -71,6 +72,12 @@ def format_size(B):
 			return '%.2f MiB' % MiB
 	else:
 		return '%.2f KiB' % KiB
+
+def getaddrinfoIPv4(host, port, family=0, type=0, proto=0, flags=0):
+	return getaddrinfo(host=host, port=port, family=AF_INET, type=type, proto=proto, flags=flags)
+
+def getaddrinfoIPv6(host, port, family=0, type=0, proto=0, flags=0):
+	return getaddrinfo(host=host, port=port, family=AF_INET6, type=type, proto=proto, flags=flags)
 
 def GetMiddleStr(content, startStr, endStr):
 	startIndex = content.index(startStr)
@@ -339,29 +346,37 @@ def upload_mv(info, msg_id, orig_msg_id, chat_id):
 
 def get_kuwo_music(musicId, msg_id, chat_id):
 	''' Cannot get albumID
-	music_info = requests.get('http://player.kuwo.cn/webmusic/st/getNewMuiseByRid?rid=MUSIC_%s' % musicId)
-	if not (music_info.ok and music_info.text != '<Song>\n</Song>\n'):
+	try:
+		music_info = requests.get('http://player.kuwo.cn/webmusic/st/getNewMuiseByRid?rid=MUSIC_%s' % musicId)
+		if not music_info.text != '<Song>\n</Song>\n':
+			return False
+		else:
+			music_info.encoding = 'utf-8'
+			music_info = music_info.text
+	except:
 		return False
-	else:
-		music_info.encoding = 'utf-8'
-		music_info = music_info.text
 	'''
 	# Require mainland China IPs
-	music_info = requests.get('http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=%s' % musicId, proxies=GlobalProxies)
-	if not music_info.ok:
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
-		return False
-	else:
+	try:
+		with ipvxpatch('socket.getaddrinfo', side_effect=getaddrinfoIPv4):
+			music_info = requests.get('http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=%s' % musicId, proxies=GlobalProxies)
 		music_info.encoding = 'utf-8'
 		music_info = json.loads(json.loads(json.dumps(music_info.text)))
 		if music_info.get('status') != 200:
 			app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
 			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music metadata.')
+		return False
 
-	music_source = requests.get('http://mobi.kuwo.cn/mobi.s?f=kuwo&q=%s' % kwDES.base64_encrypt('corp=kuwo&p2p=1&' +
-		'type=convert_url2&sig=0&format=flac|mp3&rid=%s' % musicId)).text
-	if not music_source:
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
+	try:
+		music_source = requests.get('http://mobi.kuwo.cn/mobi.s?f=kuwo&q=%s' % kwDES.base64_encrypt('corp=kuwo&p2p=1&' +
+			'type=convert_url2&sig=0&format=flac|mp3&rid=%s' % musicId)).text
+		if not music_source:
+			app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
+			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music playurl.')
 		return False
 
 	music_default_img = 'https://h5static.kuwo.cn/upload/image/4f768883f75b17a426c95b93692d98bec7d3ee9240f77f5ea68fc63870fdb050.png'
@@ -376,12 +391,15 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 	music_pack_info.append(str(music_info.get('data').get('songinfo').get('albumId')))
 	music_pack_info.append(music_info.get('data').get('songinfo').get('album') or 'None')
 	'''
-	music_album_url = requests.get('http://artistpicserver.kuwo.cn/pic.web?corp=kuwo&type=rid_pic&pictype=url&' +
-		'content=list&size=320x320&rid=%s' % musicId).text
-	if (not music_album_url) or (music_album_url == 'NO_PIC'):
+	try:
+		music_album_url = requests.get('http://artistpicserver.kuwo.cn/pic.web?corp=kuwo&type=rid_pic&pictype=url&' +
+			'content=list&size=320x320&rid=%s' % musicId).text
+		if (not music_album_url) or (music_album_url == 'NO_PIC'):
+			music_pack_info.append(music_default_img)
+		else:
+			music_pack_info.append(music_album_url)
+	except:
 		music_pack_info.append(music_default_img)
-	else:
-		music_pack_info.append(music_album_url)
 	'''
 	music_pack_info.append(music_info.get('data').get('songinfo').get('pic') or music_default_img)
 	music_pack_info.append(re.findall('flac|mp3', music_source)[0])
@@ -391,25 +409,25 @@ def get_kuwo_music(musicId, msg_id, chat_id):
 	return music_pack_info
 
 def get_migu_music(musicId, msg_id, chat_id):
-	music_info = requests.get('https://m.music.migu.cn/migu/remoting/cms_detail_tag?cpid=%s' % musicId, headers=MiguHeaders)
-	if not (music_info.ok and music_info.text):
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
-		return False
-	else:
+	try:
+		music_info = requests.get('https://m.music.migu.cn/migu/remoting/cms_detail_tag?cpid=%s' % musicId, headers=MiguHeaders)
 		music_info.encoding = 'utf-8'
 		music_info = json.loads(json.loads(json.dumps(music_info.text)))
 		music_song_id = music_info.get('data').get('songId')
 		if not music_song_id:
 			app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
 			return False
-
-	music_details = requests.get('https://music.migu.cn/v3/music/song/%s' % musicId, headers=MiguHeaders)
-	if not (music_details.ok and music_details.text):
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music details.')
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music metadata.')
 		return False
-	else:
+
+	try:
+		music_details = requests.get('https://music.migu.cn/v3/music/song/%s' % musicId, headers=MiguHeaders)
 		music_details.encoding = 'utf-8'
 		music_details = etree.HTML(music_details.text)
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music details.')
+		return False
 
 	''' Deprecated, as it requires login, and the cookie expires quickly.
 	# Acceptable quality: 1=PQ, 2=HQ, 3=SQ
@@ -417,20 +435,22 @@ def get_migu_music(musicId, msg_id, chat_id):
 	encrypted_request_data = mgAES.encrypt(json.dumps(request_data))
 	encrypted_data = urlencode(encrypted_request_data[0])
 	encrypted_secKey = urlencode(encrypted_request_data[1])
-	music_source = requests.get('https://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo?dataType=2&data=%s&secKey=%s' \
-		% (encrypted_data, encrypted_secKey), headers=MiguHeaders, cookies=MiguCookies)
+	try:
+		music_source = requests.get('https://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo?dataType=2&data=%s&secKey=%s' \
+			% (encrypted_data, encrypted_secKey), headers=MiguHeaders, cookies=MiguCookies)
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music playurl.')
+		return False
 	'''
 
 	random_str = ''.join(random.sample(string.digits + string.digits, 18))
 	# Acceptable quality: PQ, HQ, SQ, ZQ | unimplemented: LQ, Z3D, ZQ24, ZQ32
 	for quality in ['PQ', 'HQ', 'SQ', 'ZQ']:
-		music_source = requests.get('https://app.c.nf.migu.cn/MIGUM2.0/strategy/listen-url/v2.2?lowerQualityContentId=%s' \
-			% random_str + '&netType=01&resourceType=E&songId=%s&toneFlag=%s' % (music_song_id, quality), headers=MiguHeaders,
-				proxies=GlobalProxies)
-		if (music_source.status_code != 200) or (not music_source.text):
-			app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
-			return False
-		else:
+		try:
+			with ipvxpatch('socket.getaddrinfo', side_effect=getaddrinfoIPv4):
+				music_source = requests.get('https://app.c.nf.migu.cn/MIGUM2.0/strategy/listen-url/v2.2?lowerQualityContentId=%s' \
+					% random_str + '&netType=01&resourceType=E&songId=%s&toneFlag=%s' % (music_song_id, quality), headers=MiguHeaders,
+						proxies=GlobalProxies)
 			music_source = json.loads(json.loads(json.dumps(music_source.text)))
 			# if music_source.get('returnCode') != '000000':
 			if (music_source.get('code') != '000000'):
@@ -441,6 +461,11 @@ def get_migu_music(musicId, msg_id, chat_id):
 				continue
 			else:
 				break
+		except:
+			continue
+	if not music_source:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music playurl.')
+		return False
 
 	music_pack_info = [ ]
 	music_pack_info.append('migu')
@@ -458,14 +483,22 @@ def get_migu_music(musicId, msg_id, chat_id):
 	return music_pack_info
 
 def get_netease_music(musicId, msg_id, chat_id):
-	music_info = ncmtrack.GetTrackDetail(musicId)
-	if music_info.get('code') != 200:
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
+	try:
+		music_info = ncmtrack.GetTrackDetail(musicId)
+		if music_info.get('code') != 200:
+			app.edit_message_text(chat_id, msg_id, 'Failed to get music metadata.')
+			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music metadata.')
 		return False
 
-	music_source = ncmtrack.GetTrackAudio(musicId, bitrate=999000)
-	if (music_source.get('code') != 200) or (music_source.get('data')[0].get('code') != 200):
-		app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
+	try:
+		music_source = ncmtrack.GetTrackAudio(musicId, bitrate=999000)
+		if (music_source.get('code') != 200) or (music_source.get('data')[0].get('code') != 200):
+			app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
+			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get music playurl.')
 		return False
 
 	num = int()
@@ -495,21 +528,23 @@ def get_netease_music(musicId, msg_id, chat_id):
 	return music_pack_info
 
 def get_netease_mv(mvId, msg_id, chat_id):
-	mv_info = ncmmvtrack.GetMVDetail(mvId)
-	if mv_info.get('code') != 200:
-		app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
+	try:
+		mv_info = ncmmvtrack.GetMVDetail(mvId)
+		if mv_info.get('code') != 200:
+			app.edit_message_text(chat_id, msg_id, 'Failed to get MV metadata.')
+			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get MV metadata.')
 		return False
 
-	mv_source = ncmmvtrack.GetMVResource(mvId, res=1080)
-	if not mv_source.ok:
-		app.edit_message_text(chat_id, msg_id, 'Failed to get MV playurl.')
-		return False
-	else:
-		mv_source.encoding = 'utf-8'
-		mv_source = json.loads(json.loads(json.dumps(mv_source.text)))
+	try:
+		mv_source = ncmmvtrack.GetMVResource(mvId, res=1080)
 		if (mv_source.get('code') != 200):
 			app.edit_message_text(chat_id, msg_id, 'Failed to get MV playurl.')
 			return False
+	except:
+		app.edit_message_text(chat_id, msg_id, '[NET ERR] Failed to get MV playurl.')
+		return False
 
 	num = int()
 	mv_artists = str()
@@ -530,7 +565,7 @@ def get_netease_mv(mvId, msg_id, chat_id):
 	mv_pack_info.append('https://music.163.com/#/mv?id=' + mvId)
 	return mv_pack_info
 
-@app.on_message(filters.command(['kuwo'], case_sensitive=True) & filters.chat(allow_chat_id))
+@app.on_message(filters.command(['kuwo', 'kuwo@ctcgfw_musicpusher_bot'], case_sensitive=True) & filters.chat(allow_chat_id) & ~filters.edited)
 def kuwo_command(client, message):
 	kuwo_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not kuwo_musicinfo:
@@ -545,15 +580,15 @@ def kuwo_command(client, message):
 		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
 
 		keyword = urlencode(kuwo_musicinfo)
-		# search_info = requests.get('http://search.kuwo.cn/r.s?SONGNAME=%s&ft=music&rformat=json&encoding=utf8&rn=1')
-		# Get CSRF token, required by search api
-		search_request = requests.get('http://kuwo.cn/search/list?key=%s' % keyword)
-		search_cookies = search_request.cookies
-		search_token = search_request.cookies.get('kw_token')
-		search_headers = {'referer': 'http://kuwo.cn/search/list?key=%s' % keyword, 'csrf': search_token}
-		search_info = requests.get('http://www.kuwo.cn/api/www/search/searchMusicBykeyWord?key=%s&pn=1&rn=1' % keyword,
-			cookies=search_cookies, headers=search_headers)
-		if (search_info.ok and search_info.text):
+		try:
+			# search_info = requests.get('http://search.kuwo.cn/r.s?SONGNAME=%s&ft=music&rformat=json&encoding=utf8&rn=1')
+			# Get CSRF token, required by search api
+			search_request = requests.get('http://kuwo.cn/search/list?key=%s' % keyword)
+			search_cookies = search_request.cookies
+			search_token = search_request.cookies.get('kw_token')
+			search_headers = {'referer': 'http://kuwo.cn/search/list?key=%s' % keyword, 'csrf': search_token}
+			search_info = requests.get('http://www.kuwo.cn/api/www/search/searchMusicBykeyWord?key=%s&pn=1&rn=1' % keyword,
+				cookies=search_cookies, headers=search_headers)
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
 			# if (int(GetKuwoJsonItem(search_info, 'HIT') == 0) or (int(GetKuwoJsonItem(search_info, 'TOTAL')) < 1):
@@ -563,11 +598,11 @@ def kuwo_command(client, message):
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
 				# kuwo_musicid = GetKuwoJsonItem(search_info, 'MUSICRID').replace('MUSIC_', '')
-				kuwo_musicid = search_info.get('data').get('list')[0].get('musicrid').replace('MUSIC_', '')
-				kuwo_info = get_kuwo_music(kuwo_musicid, update_message_id, message.chat.id)
-				if kuwo_info: upload_music(kuwo_info, update_message_id, original_message_id, message.chat.id)
-		else:
-			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
+			kuwo_musicid = search_info.get('data').get('list')[0].get('musicrid').replace('MUSIC_', '')
+			kuwo_info = get_kuwo_music(kuwo_musicid, update_message_id, message.chat.id)
+			if kuwo_info: upload_music(kuwo_info, update_message_id, original_message_id, message.chat.id)
+		except:
+			app.edit_message_text(message.chat.id, update_message_id, '[NET ERR] Failed to search music information.')
 	else:
 		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
@@ -576,7 +611,7 @@ def kuwo_command(client, message):
 
 	lock.close()
 
-@app.on_message(filters.command(['migu'], case_sensitive=True) & filters.chat(allow_chat_id))
+@app.on_message(filters.command(['migu', 'migu@ctcgfw_musicpusher_bot'], case_sensitive=True) & filters.chat(allow_chat_id) & ~filters.edited)
 def migu_command(client, message):
 	migu_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not migu_musicinfo:
@@ -590,9 +625,9 @@ def migu_command(client, message):
 	if not str.isdigit(migu_musicinfo):
 		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
 
-		search_info = requests.get('http://m.music.migu.cn/migu/remoting/scr_search_tag?keyword=%s&type=2&rows=1&pgc=1' \
-			% urlencode(migu_musicinfo), headers=MiguHeaders)
-		if (search_info.ok and search_info.text):
+		try:
+			search_info = requests.get('http://m.music.migu.cn/migu/remoting/scr_search_tag?keyword=%s&type=2&rows=1&pgc=1' \
+				% urlencode(migu_musicinfo), headers=MiguHeaders)
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
 			if (not search_info.get('success')) or (not search_info.get('pgt')):
@@ -603,8 +638,8 @@ def migu_command(client, message):
 				migu_musicid = str(search_info.get('musics')[0].get('copyrightId'))
 				migu_info = get_migu_music(migu_musicid, update_message_id, message.chat.id)
 				if migu_info: upload_music(migu_info, update_message_id, original_message_id, message.chat.id)
-		else:
-			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
+		except:
+			app.edit_message_text(message.chat.id, update_message_id, '[NET ERR] Failed to search music information.')
 	else:
 		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
@@ -613,7 +648,7 @@ def migu_command(client, message):
 
 	lock.close()
 
-@app.on_message(filters.command(['netease'], case_sensitive=True) & filters.chat(allow_chat_id))
+@app.on_message(filters.command(['netease', 'netease@ctcgfw_musicpusher_bot'], case_sensitive=True) & filters.chat(allow_chat_id) & ~filters.edited)
 def netease_command(client, message):
 	netease_musicinfo = ' '.join(message.text.split(' ')[1:])
 	if not netease_musicinfo:
@@ -627,12 +662,12 @@ def netease_command(client, message):
 	if not str.isdigit(netease_musicinfo):
 		app.edit_message_text(message.chat.id, update_message_id, 'Searching music information...')
 
-		# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_musicinfo), type=ncmsearch.TYPE_SONG, limit=1, offset=0)
-		search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1&limit=1&offset=0' % urlencode(netease_musicinfo))
-		if (search_info.ok and search_info.text):
+		try:
+			# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_musicinfo), type=ncmsearch.TYPE_SONG, limit=1, offset=0)
+			search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1&limit=1&offset=0' % urlencode(netease_musicinfo))
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
-			if (search_info.get('code') != 200) or (not search_info.get('result').get('songCount')):
+			if (search_info.get('code') != 200) or (search_info.get('result').get('songCount') < 1):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
@@ -640,8 +675,8 @@ def netease_command(client, message):
 				netease_musicid = str(search_info.get('result').get('songs')[0].get('id'))
 				netease_info = get_netease_music(netease_musicid, update_message_id, message.chat.id)
 				if netease_info: upload_music(netease_info, update_message_id, original_message_id, message.chat.id)
-		else:
-			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search music information.')
+		except:
+			app.edit_message_text(message.chat.id, update_message_id, '[NET ERR] Failed to search music information.')
 	else:
 		app.edit_message_text(message.chat.id, update_message_id, 'Getting music information...')
 
@@ -650,7 +685,7 @@ def netease_command(client, message):
 
 	lock.close()
 
-@app.on_message(filters.command(['neteasemv'], case_sensitive=True) & filters.chat(allow_chat_id))
+@app.on_message(filters.command(['neteasemv', 'neteasemv@ctcgfw_musicpusher_bot'], case_sensitive=True) & filters.chat(allow_chat_id) & ~filters.edited)
 def neteasemv_command(client, message):
 	netease_mvinfo = ' '.join(message.text.split(' ')[1:])
 	if not netease_mvinfo:
@@ -664,12 +699,12 @@ def neteasemv_command(client, message):
 	if not str.isdigit(netease_mvinfo):
 		app.edit_message_text(message.chat.id, update_message_id, 'Searching MV information...')
 
-		# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_mvinfo), type=ncmsearch.TYPE_MV, limit=1, offset=0)
-		search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1004&limit=1&offset=0' % urlencode(netease_mvinfo))
-		if (search_info.ok and search_info.text):
+		try:
+			# search_info = ncmsearch.GetSearchResult(keyword=urlencode(netease_mvinfo), type=ncmsearch.TYPE_MV, limit=1, offset=0)
+			search_info = requests.get('https://music.163.com/api/search/get?s=%s&type=1004&limit=1&offset=0' % urlencode(netease_mvinfo))
 			search_info.encoding = 'utf-8'
 			search_info = json.loads(json.loads(json.dumps(search_info.text)))
-			if (search_info.get('code') != 200) or (not search_info.get('result').get('mvCount')):
+			if (search_info.get('code') != 200) or (search_info.get('result').get('mvCount') < 1):
 				app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
 			else:
 				app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
@@ -677,8 +712,8 @@ def neteasemv_command(client, message):
 				netease_mvid = str(search_info.get('result').get('mvs')[0].get('id'))
 				netease_info = get_netease_mv(netease_mvid, update_message_id, message.chat.id)
 				if netease_info: upload_mv(netease_info, update_message_id, original_message_id, message.chat.id)
-		else:
-			app.edit_message_text(message.chat.id, update_message_id, 'Failed to search MV information.')
+		except:
+			app.edit_message_text(message.chat.id, update_message_id, '[NET ERR] Failed to search MV information.')
 	else:
 		app.edit_message_text(message.chat.id, update_message_id, 'Getting MV information...')
 
