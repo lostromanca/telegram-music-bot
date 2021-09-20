@@ -445,7 +445,7 @@ def get_migu_music(musicId, msg_id, chat_id):
 
 	random_str = ''.join(random.sample(string.digits + string.digits, 18))
 	# Acceptable quality: PQ, HQ, SQ, ZQ | unimplemented: LQ, Z3D, ZQ24, ZQ32
-	for quality in ['PQ', 'HQ', 'SQ', 'ZQ']:
+	for quality in ['ZQ', 'SQ', 'HQ', 'PQ']:
 		try:
 			with ipvxpatch('socket.getaddrinfo', side_effect=getaddrinfoIPv4):
 				music_source = requests.get('https://app.c.nf.migu.cn/MIGUM2.0/strategy/listen-url/v2.2?lowerQualityContentId=%s' \
@@ -457,7 +457,7 @@ def get_migu_music(musicId, msg_id, chat_id):
 				app.edit_message_text(chat_id, msg_id, 'Failed to get music playurl.')
 				return False
 				break
-			elif music_source.get('formatType') != quality:
+			elif music_source.get('data').get('formatType') != quality:
 				continue
 			else:
 				break
